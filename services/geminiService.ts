@@ -1,41 +1,47 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Chat } from "@google/genai";
 import { FinancialData, AIAdvice, formatCurrency } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+const SYSTEM_INSTRUCTION = `You are "WealthWisdom", an AI-powered personal finance assistant.
+Your goal is to help users understand their income, expenses, savings, loans, insurance, and financial risk in a simple and friendly way.
+
+Follow these principles:
+1. CONTEXT: Support users across life stages — working professionals, families, small business owners, and retirees — with practical financial awareness.
+2. KNOWLEDGE: Use general knowledge about budgeting, saving, loans, insurance, and common financial products.
+3. TONE: Professional, supportive, and non-judgmental.
+4. FORMATTING: Use clear language. Use **bold** for key points.
+5. PURPOSE: Help users make better financial decisions by showing patterns, risks, and opportunities.
+6. DEBT-VS-GOALS: If a user has a significant loan and a long-term goal (like child education), provide a strategy to balance both.
+
+IMPORTANT: You must include this exact text at the end of every response: 
+"\n\nDisclaimer: This is an AI-generated financial insight tool, not professional financial advice."`;
+
 export const analyzeFinance = async (data: FinancialData): Promise<AIAdvice> => {
   const formattedIncome = formatCurrency(data.monthlyIncome, data.currency);
-  const totalMonthlySavings = data.savings.mutualFunds + data.savings.fixedDeposits + data.savings.bankSavings + data.savings.gold + data.savings.generalSavings;
+  const totalMonthlySavings = Object.values(data.savings).reduce((a, b) => a + b, 0);
   
   const prompt = `
-    Act as a professional personal finance advisor. Analyze this data to provide a risk assessment:
+    Analyze this financial data:
     - Currency: ${data.currency}
     - Monthly Income: ${formattedIncome}
-    - Total Monthly Savings: ${formatCurrency(totalMonthlySavings, data.currency)} 
-      (General Savings: ${data.savings.generalSavings}, MFs: ${data.savings.mutualFunds}, FDs: ${data.savings.fixedDeposits}, Bank: ${data.savings.bankSavings}, Gold: ${data.savings.gold})
     - Monthly Expenses: ${formatCurrency(data.monthlyExpenses, data.currency)}
     - Monthly EMI/Loans: ${formatCurrency(data.monthlyEMI, data.currency)}
-    - Monthly Health Expenses: ${formatCurrency(data.healthExpenses, data.currency)}
-    - Has Health Insurance: ${data.hasHealthInsurance ? 'Yes' : 'No'}
-    - Term Insurance: ${data.termInsurance.hasPolicy ? `Yes (Premium: ${data.termInsurance.premium})` : 'No'}
-    - Life Insurance: ${data.lifeInsurance.hasPolicy ? `Yes (Premium: ${data.lifeInsurance.premium})` : 'No'}
+    - Total Monthly Savings: ${formatCurrency(totalMonthlySavings, data.currency)}
     - Dependents: ${data.dependents}
+    - Protection: Health Insurance (${data.healthInsurance.hasPolicy}), Term (${data.termInsurance.hasPolicy})
+    - Goals: ${JSON.stringify(data.goals)}
 
-    Specific logic to apply:
-    1. If Savings < 20% of Income, warn: "You are not saving enough for emergencies."
-    2. If Health Expenses > 10% of Income and Has Health Insurance is No, warn: "Your health expenses are high. You should consider a health insurance plan."
-    3. If Dependents > 0 and Term Insurance is No, warn: "You do not have term insurance, which is risky for a family with dependents."
-    4. Provide exactly 3 Smart Actions.
-    5. Financial Risk Level must be one of: Low, Medium, High.
-
-    Provide response in JSON format.
+    Provide a strategy to balance current debt/expenses with their listed goals.
+    Return JSON format.
   `;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: prompt,
     config: {
+      systemInstruction: SYSTEM_INSTRUCTION,
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -48,14 +54,45 @@ export const analyzeFinance = async (data: FinancialData): Promise<AIAdvice> => 
           smartActions: { type: Type.ARRAY, items: { type: Type.STRING } },
           warnings: { type: Type.ARRAY, items: { type: Type.STRING } },
           savingsHealthScore: { type: Type.NUMBER },
-          protectionScore: { type: Type.NUMBER }
+          protectionScore: { type: Type.NUMBER },
+          goalFeasibility: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                goalName: { type: Type.STRING },
+                isFeasible: { type: Type.BOOLEAN },
+                suggestion: { type: Type.STRING }
+              }
+            }
+          }
         },
-        required: ['riskLevel', 'healthScore', 'healthStatus', 'explanation', 'advicePoints', 'smartActions', 'warnings', 'savingsHealthScore', 'protectionScore']
+        required: ['riskLevel', 'healthScore', 'healthStatus', 'explanation', 'advicePoints', 'smartActions', 'warnings', 'savingsHealthScore', 'protectionScore', 'goalFeasibility']
       }
     }
   });
 
   return JSON.parse(response.text.trim()) as AIAdvice;
+};
+
+export const startChatSession = (context?: FinancialData): Chat => {
+  let contextPrompt = "";
+  if (context) {
+    contextPrompt = `
+      CURRENT USER PROFILE CONTEXT:
+      - Monthly Income: ${context.monthlyIncome} ${context.currency}
+      - Expenses: ${context.monthlyExpenses}, EMI: ${context.monthlyEMI}
+      - Goals: ${JSON.stringify(context.goals)}
+      User is specifically looking for advice on balancing their ₹2 lakh loan and education savings.
+    `;
+  }
+
+  return ai.chats.create({
+    model: 'gemini-3-flash-preview',
+    config: {
+      systemInstruction: SYSTEM_INSTRUCTION + (contextPrompt ? `\n\n${contextPrompt}` : ""),
+    },
+  });
 };
 
 export const generateAppLogo = async (): Promise<string | null> => {
@@ -64,7 +101,7 @@ export const generateAppLogo = async (): Promise<string | null> => {
       model: 'gemini-2.5-flash-image',
       contents: {
         parts: [{
-          text: "A sophisticated, ultra-minimalist luxury fintech logo icon. A single elegant symbol combining a stylized diamond and a subtle upward trend line. Monochromatic Indigo and Slate. Clean, sharp vector lines. High contrast, isolated on white background. Professional, high-end corporate identity style."
+          text: "A professional and minimal startup logo for a finance app called WealthWisdom. The icon is a sleek, modern Banyan tree where the trunk looks like a rising currency graph. Primary color is a deep trust-blue (#1a237e) and soft growth-green (#2e7d32). White background, high quality vector style, clean lines, no text in the icon itself"
         }]
       }
     });

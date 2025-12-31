@@ -18,15 +18,24 @@ export const SUPPORTED_CURRENCIES: Currency[] = [
   { code: 'JPY', symbol: '¥', name: 'Japanese Yen', locale: 'ja-JP' },
 ];
 
+export interface FinancialGoal {
+  name: string;
+  targetAmount: number;
+  years: number;
+}
+
 export interface FinancialData {
   monthlyIncome: number;
   monthlyExpenses: number;
   monthlyEMI: number;
   healthExpenses: number;
-  hasHealthInsurance: boolean;
+  healthInsurance: {
+    hasPolicy: boolean;
+    premium: number;
+    frequency: InsuranceFrequency;
+  };
   dependents: number;
   currency: string;
-  // Specific Savings
   savings: {
     mutualFunds: number;
     fixedDeposits: number;
@@ -34,7 +43,6 @@ export interface FinancialData {
     gold: number;
     generalSavings: number;
   };
-  // Detailed Insurance
   termInsurance: {
     hasPolicy: boolean;
     premium: number;
@@ -45,6 +53,8 @@ export interface FinancialData {
     premium: number;
     frequency: InsuranceFrequency;
   };
+  // New field for goal tracking
+  goals: FinancialGoal[];
 }
 
 export interface AIAdvice {
@@ -57,6 +67,12 @@ export interface AIAdvice {
   warnings: string[];
   savingsHealthScore: number;
   protectionScore: number;
+  // Goal feasibility feedback
+  goalFeasibility: {
+    goalName: string;
+    isFeasible: boolean;
+    suggestion: string;
+  }[];
 }
 
 export const formatCurrency = (amount: number, currencyCode: string): string => {
